@@ -153,8 +153,8 @@ function rhythmSweepDetect(
   let bestHits: number[] = [];
   let bestScore = 1e9;
 
-  for (let si = 0; si < 25; si++) {
-    const sens = 0.8 + si * (4.2 / 24);
+  for (let si = 0; si < 45; si++) {
+    const sens = 0.5 + si * (5.5 / 44);
     const hits: number[] = [];
     let last = -minDistF;
     for (let i = 1; i < flux.length - 1; i++) {
@@ -229,6 +229,103 @@ function rhythmFill(
     if (!pruned.length || t - pruned[pruned.length - 1] >= minGap) pruned.push(t);
   }
   return pruned.map((t) => Math.round((t * sampleRate) / hopSize));
+}
+
+// ─── Sparse-file detection (noisy field recordings) ─────────────────────────
+// Used when autocorrelation detects noise period (detected_hits << expected_from_period).
+// 1. CV sweep: find the most regularly-spaced hit set (min 4 hits).
+// 2. Try subharmonic halving (period/2) with no-cascade fill + p95 threshold.
+
+function sparseDetect(
+  flux: Float32Array,
+  thrBase: Float32Array,
+  sampleRate: number,
+  hopSize: number,
+  duration: number
+): number[] {
+  // --- Step 1: CV sweep ---
+  const minDistCandidates: number[] = [];
+  for (let md = 0.3; md < 1.0; md += 0.1) minDistCandidates.push(md);
+  for (let md = 1.0; md < Math.min(duration / 2, 4.0); md += 0.25) minDistCandidates.push(md);
+
+  let bestHits: number[] = [], bestCV = 1e9, bestPeriod = 1.0;
+
+  for (const minDistSec of minDistCandidates) {
+    const minD = Math.max(1, Math.round((minDistSec * sampleRate) / hopSize));
+    for (let si = 0; si < 40; si++) {
+      const sens = 0.5 + si * (5.5 / 39);
+      const h: number[] = [];
+      let last = -minD;
+      for (let i = 1; i < flux.length - 1; i++) {
+        if (
+          flux[i] > thrBase[i] * sens &&
+          flux[i] >= flux[i - 1] &&
+          flux[i] >= flux[i + 1] &&
+          i - last >= minD
+        ) { h.push(i); last = i; }
+      }
+      if (h.length < 4) continue;
+      const times = h.map((x) => (x * hopSize) / sampleRate);
+      const intervals = times.slice(1).map((t, i) => t - times[i]);
+      const meanIv = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+      if (meanIv < 0.3) continue;
+      const cv = Math.sqrt(intervals.reduce((a, b) => a + (b - meanIv) ** 2, 0) / intervals.length) / meanIv;
+      if (cv < bestCV) { bestCV = cv; bestHits = h; bestPeriod = meanIv; }
+    }
+  }
+
+  if (bestHits.length < 2) return bestHits;
+
+  // --- Step 2: try period/2 with no-cascade fill + p95 threshold ---
+  const fluxArr = Array.from(flux);
+  const sorted = fluxArr.slice().sort((a, b) => a - b);
+  const p95 = sorted[Math.floor(sorted.length * 0.95)];
+
+  const baseN = bestHits.length;
+
+  function fillNoCascade(hits: number[], periodSec: number): number[] {
+    if (hits.length < 2) return hits;
+    const timesOrig = hits.map((h) => (h * hopSize) / sampleRate).sort((a, b) => a - b);
+    const newTimes: number[] = [];
+    const tol = 0.4;
+    for (let i = 0; i < timesOrig.length - 1; i++) {
+      const gap = timesOrig[i + 1] - timesOrig[i];
+      const n = Math.round(gap / periodSec);
+      if (n >= 2) {
+        for (let k = 1; k < n; k++) {
+          const et = timesOrig[i] + k * periodSec;
+          const fi = Math.round((et * sampleRate) / hopSize);
+          const win = Math.round((tol * periodSec * sampleRate) / hopSize);
+          const lo = Math.max(0, fi - win);
+          const hi = Math.min(flux.length - 1, fi + win);
+          if (lo < hi) {
+            let peakI = lo;
+            for (let j = lo + 1; j <= hi; j++) if (flux[j] > flux[peakI]) peakI = j;
+            if (flux[peakI] > p95) newTimes.push((peakI * hopSize) / sampleRate);
+          }
+        }
+      }
+    }
+    const all = [...timesOrig, ...newTimes].sort((a, b) => a - b);
+    const deduped = Array.from(new Set(all.map((t) => Math.round(t * 1000) / 1000)));
+    const minGap = periodSec * 0.4;
+    const pruned: number[] = [];
+    for (const t of deduped) {
+      if (!pruned.length || t - pruned[pruned.length - 1] >= minGap) pruned.push(t);
+    }
+    return pruned.map((t) => Math.round((t * sampleRate) / hopSize));
+  }
+
+  // Try halving the period
+  const halfPeriod = bestPeriod / 2;
+  if (halfPeriod >= 0.3) {
+    const filled = fillNoCascade(bestHits, halfPeriod);
+    if (filled.length > baseN && filled.length <= baseN * 2.5) {
+      return filled;
+    }
+  }
+
+  return bestHits;
 }
 
 // ─── Session detection ───────────────────────────────────────────────────────
@@ -311,11 +408,21 @@ export async function analyzeAudio(
   onProgress(80);
 
   // 6. Rhythm-aware sweep (auto-calibrates sensitivity)
-  const hitFrames = rhythmSweepDetect(flux, thrBase, sampleRate, hopSize, periodSec);
+  const hitFramesRaw = rhythmSweepDetect(flux, thrBase, sampleRate, hopSize, periodSec);
   onProgress(87);
 
-  // 7. Fill in missed hits on the rhythm grid
-  const filledFrames = rhythmFill(hitFrames, flux, sampleRate, hopSize, periodSec);
+  // 6b. Sparse fallback: if very few hits found relative to expected count,
+  //     the autocorrelation period is likely noise-dominated (e.g. excavator hum).
+  //     Use CV-sweep + subharmonic fill instead.
+  const expectedFromPeriod = totalDuration / periodSec;
+  const sparsityRatio = hitFramesRaw.length / expectedFromPeriod;
+  let filledFrames: number[];
+  if (sparsityRatio < 0.25 && hitFramesRaw.length < 5) {
+    filledFrames = sparseDetect(flux, thrBase, sampleRate, hopSize, totalDuration);
+  } else {
+    // 7. Fill in missed hits on the rhythm grid
+    filledFrames = rhythmFill(hitFramesRaw, flux, sampleRate, hopSize, periodSec);
+  }
   const hitTimes = filledFrames.map((f) => (f * hopSize) / sampleRate);
   onProgress(92);
 
