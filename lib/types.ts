@@ -1,7 +1,4 @@
-export type BreakerType = "small" | "medium" | "large";
-
 export interface AnalysisSettings {
-  breakerType: BreakerType;
   gapThreshold: number; // seconds, 1 ~ 15
 }
 

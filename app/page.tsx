@@ -13,7 +13,6 @@ import SessionList from "@/components/SessionList";
 import AudioPlayer from "@/components/AudioPlayer";
 
 const DEFAULT_SETTINGS: AnalysisSettings = {
-  breakerType: "large",
   gapThreshold: 3.0,
 };
 

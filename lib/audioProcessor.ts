@@ -32,13 +32,8 @@ function fft(re: Float32Array, im: Float32Array): void {
   }
 }
 
-// ─── Breaker frequency bands ─────────────────────────────────────────────────
-
-function getBands(type: string): { lo: number; hi: number } {
-  if (type === "small")  return { lo: 120, hi: 1200 };
-  if (type === "medium") return { lo: 80,  hi: 800  };
-  return                        { lo: 60,  hi: 800  }; // large
-}
+// Fixed wide-band covering all breaker types (60–1200 Hz)
+const FLUX_BAND = { lo: 60, hi: 1200 };
 
 // ─── Spectral Flux ───────────────────────────────────────────────────────────
 
@@ -302,8 +297,7 @@ export async function analyzeAudio(
 
   // 3. Spectral flux
   const frameSize = 2048, hopSize = 512;
-  const { lo, hi } = getBands(settings.breakerType);
-  const flux = await computeSpectralFlux(audio, sampleRate, frameSize, hopSize, lo, hi, onProgress, 10, 70);
+  const flux = await computeSpectralFlux(audio, sampleRate, frameSize, hopSize, FLUX_BAND.lo, FLUX_BAND.hi, onProgress, 10, 70);
   onProgress(70);
 
   const fluxTimes = Array.from({ length: flux.length }, (_, i) => (i * hopSize) / sampleRate);
