@@ -32,8 +32,9 @@ function fft(re: Float32Array, im: Float32Array): void {
   }
 }
 
-// Fixed wide-band covering all breaker types (60–1200 Hz)
-const FLUX_BAND = { lo: 60, hi: 1200 };
+// 80–500 Hz: best trade-off across all breaker types
+// (wider bands cause period doubling errors on fast breakers)
+const FLUX_BAND = { lo: 80, hi: 500 };
 
 // ─── Spectral Flux ───────────────────────────────────────────────────────────
 
