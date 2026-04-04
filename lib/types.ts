@@ -2,8 +2,7 @@ export type BreakerType = "small" | "medium" | "large";
 
 export interface AnalysisSettings {
   breakerType: BreakerType;
-  sensitivity: number;   // threshold multiplier, 0.5 ~ 5.0
-  gapThreshold: number;  // seconds, 1 ~ 10
+  gapThreshold: number; // seconds, 1 ~ 15
 }
 
 export interface Session {
@@ -38,4 +37,8 @@ export interface AnalysisResult {
 
   hopSize: number;
   sampleRate: number;
+
+  // Auto-detection metadata
+  detectedPeriod: number;   // seconds
+  periodConfidence: number; // 0–1
 }

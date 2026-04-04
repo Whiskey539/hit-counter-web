@@ -14,7 +14,6 @@ import AudioPlayer from "@/components/AudioPlayer";
 
 const DEFAULT_SETTINGS: AnalysisSettings = {
   breakerType: "large",
-  sensitivity: 1.5,
   gapThreshold: 3.0,
 };
 
@@ -111,7 +110,7 @@ export default function Home() {
             </button>
           </div>
 
-          <Settings settings={settings} onChange={setSettings} disabled={analyzing} />
+          <Settings settings={settings} onChange={setSettings} disabled={analyzing} result={result} />
 
           {/* Analyze button */}
           <button
