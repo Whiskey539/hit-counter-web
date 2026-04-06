@@ -46,6 +46,7 @@ export default function Home() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
+  const [zoom, setZoom] = useState(1);
   const prevUrlRef = useRef<string | null>(null);
 
   function handleFile(f: File) {
@@ -167,12 +168,29 @@ export default function Home() {
           <AudioPlayer src={audioUrl} onTimeUpdate={setCurrentTime} />
 
           {/* Charts */}
+          <div className="flex items-center justify-end gap-2">
+            <span className="text-xs text-slate-400">확대</span>
+            {[1, 2, 4, 8].map((z) => (
+              <button
+                key={z}
+                onClick={() => setZoom(z)}
+                className={`px-2.5 py-1 rounded text-xs font-mono transition-colors border ${
+                  zoom === z
+                    ? "bg-sky-600 border-sky-500 text-white"
+                    : "bg-slate-800 border-slate-600 text-slate-300 hover:border-slate-400"
+                }`}
+              >
+                {z}×
+              </button>
+            ))}
+          </div>
           <WaveformCanvas
             waveform={result.waveform}
             waveformTimes={result.waveformTimes}
             hitTimes={result.hitTimes}
             totalDuration={result.totalDuration}
             currentTime={currentTime}
+            zoom={zoom}
           />
           <FluxCanvas
             flux={result.flux}
@@ -181,6 +199,7 @@ export default function Home() {
             hitTimes={result.hitTimes}
             totalDuration={result.totalDuration}
             currentTime={currentTime}
+            zoom={zoom}
           />
 
           {/* Session list */}

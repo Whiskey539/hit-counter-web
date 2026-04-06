@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface Props {
   flux: number[];
@@ -9,15 +9,32 @@ interface Props {
   hitTimes: number[];
   totalDuration: number;
   currentTime: number;
+  zoom: number;
 }
 
 const PAD = { top: 16, bottom: 24, left: 8, right: 8 };
 
 export default function FluxCanvas({
-  flux, fluxTimes, threshold, hitTimes, totalDuration, currentTime,
+  flux, fluxTimes, threshold, hitTimes, totalDuration, currentTime, zoom,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const baseImageRef = useRef<ImageData | null>(null);
+  const [containerWidth, setContainerWidth] = useState(800);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const obs = new ResizeObserver((entries) => {
+      setContainerWidth(entries[0].contentRect.width);
+    });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
+  const canvasWidth = Math.max(containerWidth, containerWidth * zoom);
+  const canvasHeight = 200;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -25,8 +42,8 @@ export default function FluxCanvas({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const W = canvas.width;
-    const H = canvas.height;
+    const W = canvasWidth;
+    const H = canvasHeight;
     const drawW = W - PAD.left - PAD.right;
     const drawH = H - PAD.top - PAD.bottom;
 
@@ -102,9 +119,11 @@ export default function FluxCanvas({
     ctx.fillStyle = "#475569";
     ctx.font = "10px monospace";
     ctx.textAlign = "center";
-    const nLabels = Math.min(11, Math.max(2, Math.floor(totalDuration / 10) + 2));
-    for (let i = 0; i < nLabels; i++) {
-      const t = (i / (nLabels - 1)) * totalDuration;
+    const labelInterval = zoom <= 2 ? 10 : zoom <= 4 ? 5 : 2;
+    const nLabels = Math.floor(totalDuration / labelInterval) + 1;
+    for (let i = 0; i <= nLabels; i++) {
+      const t = i * labelInterval;
+      if (t > totalDuration) break;
       const x = tx(t);
       const m = Math.floor(t / 60);
       const s = Math.floor(t % 60);
@@ -112,8 +131,9 @@ export default function FluxCanvas({
     }
 
     baseImageRef.current = ctx.getImageData(0, 0, W, H);
-  }, [flux, fluxTimes, threshold, hitTimes, totalDuration]);
+  }, [flux, fluxTimes, threshold, hitTimes, totalDuration, canvasWidth, zoom]);
 
+  // Overlay playback line + auto-scroll
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !baseImageRef.current) return;
@@ -122,10 +142,9 @@ export default function FluxCanvas({
 
     ctx.putImageData(baseImageRef.current, 0, 0);
 
+    const drawW = canvasWidth - PAD.left - PAD.right;
+
     if (currentTime > 0 && currentTime <= totalDuration) {
-      const W = canvas.width;
-      const H = canvas.height;
-      const drawW = W - PAD.left - PAD.right;
       const x = PAD.left + (currentTime / totalDuration) * drawW;
 
       ctx.strokeStyle = "#f97316cc";
@@ -133,10 +152,20 @@ export default function FluxCanvas({
       ctx.setLineDash([]);
       ctx.beginPath();
       ctx.moveTo(x, PAD.top);
-      ctx.lineTo(x, H - PAD.bottom);
+      ctx.lineTo(x, canvasHeight - PAD.bottom);
       ctx.stroke();
+
+      // Auto-scroll to keep playhead visible
+      const scrollEl = scrollRef.current;
+      if (scrollEl) {
+        const visible = scrollEl.clientWidth;
+        const left = scrollEl.scrollLeft;
+        if (x > left + visible * 0.85 || x < left + visible * 0.1) {
+          scrollEl.scrollLeft = Math.max(0, x - visible * 0.3);
+        }
+      }
     }
-  }, [currentTime, totalDuration]);
+  }, [currentTime, totalDuration, canvasWidth]);
 
   return (
     <div className="rounded-lg overflow-hidden bg-slate-900 border border-slate-700">
@@ -154,7 +183,16 @@ export default function FluxCanvas({
           타격 감지
         </span>
       </div>
-      <canvas ref={canvasRef} width={1200} height={200} className="w-full h-auto" />
+      <div ref={containerRef} className="w-full">
+        <div ref={scrollRef} className="overflow-x-auto">
+          <canvas
+            ref={canvasRef}
+            width={canvasWidth}
+            height={canvasHeight}
+            style={{ display: "block", width: canvasWidth, height: "auto" }}
+          />
+        </div>
+      </div>
     </div>
   );
 }
